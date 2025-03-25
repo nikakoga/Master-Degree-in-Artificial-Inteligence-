@@ -287,3 +287,37 @@ optimizer_krob200_weighted_regret.plot_cycles(cycle1_krob200_weighted_regret, cy
 
 plt.tight_layout()
 plt.show()
+
+def run_experiments(optimizer_class, problem_name, label, runs=100):
+    total_lengths = []
+
+    for i in range(runs):
+        random.seed(i)  # Ustaw ziarno dla powtarzalności
+        optimizer = optimizer_class(problem_name)
+        if isinstance(optimizer, WeightedRegretCycleOptimizer):
+            cycle1, cycle2 = optimizer.create_two_cycles(weight1=1, weight2=-1)
+        else:
+            cycle1, cycle2 = optimizer.create_two_cycles()
+        length1 = optimizer.calculate_cycle_length(cycle1)
+        length2 = optimizer.calculate_cycle_length(cycle2)
+        total_lengths.append(length1 + length2)
+
+    avg = round(np.mean(total_lengths), 2)
+    min_val = int(np.min(total_lengths))
+    max_val = int(np.max(total_lengths))
+
+    return f"{label}: {avg} ({min_val} – {max_val})"
+
+print("\n=== EXPERIMENTS (100 RUNS) ===")
+
+print("kroA200:")
+print(run_experiments(GreedyCycleOptimizer, 'kroA200', "Greedy"))
+print(run_experiments(NearestNeighborCycleOptimizer, 'kroA200', "Nearest Neighbor"))
+print(run_experiments(RegretCycleOptimizer, 'kroA200', "2-Regret"))
+print(run_experiments(WeightedRegretCycleOptimizer, 'kroA200', "Weighted 2-Regret"))
+
+print("\nkroB200:")
+print(run_experiments(GreedyCycleOptimizer, 'kroB200', "Greedy"))
+print(run_experiments(NearestNeighborCycleOptimizer, 'kroB200', "Nearest Neighbor"))
+print(run_experiments(RegretCycleOptimizer, 'kroB200', "2-Regret"))
+print(run_experiments(WeightedRegretCycleOptimizer, 'kroB200', "Weighted 2-Regret"))
