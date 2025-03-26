@@ -50,6 +50,7 @@ class CycleOptimizer:
         plt.ylabel('Y')
 
 class GreedyCycleOptimizer(CycleOptimizer):
+    
     def create_two_cycles(self):
         n = len(self.distance_matrix)
         half_n = n // 2 + n % 2
@@ -57,21 +58,42 @@ class GreedyCycleOptimizer(CycleOptimizer):
         start_node1 = random.randint(0, n - 1)
         start_node2 = max(range(n), key=lambda node: self.distance_matrix[start_node1, node])
 
+        # Usuń oba startowe wierzchołki z unvisited
         unvisited = set(range(n))
+        unvisited.discard(start_node1)
+        unvisited.discard(start_node2)
 
-        cycle1 = self.greedy_cycle(start_node1, half_n, unvisited)
-        cycle2 = self.greedy_cycle(start_node2, n - half_n, unvisited)
+        # Twórz cykle na kopiach zbioru unvisited
+        cycle1 = self.greedy_cycle(start_node1, half_n, unvisited.copy())
+
+        if start_node2 in cycle1:
+            raise RuntimeError("start_node2 was added to cycle1! This should not happen.")
+
+        cycle2 = self.greedy_cycle(start_node2, n - half_n, unvisited.copy())
 
         return cycle1, cycle2
+
 
     def greedy_cycle(self, start_node, cycle_length, unvisited):
         n = len(self.distance_matrix)
         cycle = [start_node]
-        unvisited.remove(start_node)
+        unvisited.discard(start_node)  # Użyj discard zamiast remove, żeby uniknąć KeyError
 
         while len(cycle) < cycle_length:
-            next_node = min(unvisited, key=lambda node: min(self.distance_matrix[node, cycle[i]] for i in range(len(cycle))))
-            best_position = min(range(len(cycle)), key=lambda i: self.distance_matrix[cycle[i], next_node] + self.distance_matrix[next_node, cycle[(i + 1) % len(cycle)]] - self.distance_matrix[cycle[i], cycle[(i + 1) % len(cycle)]])
+            # Wybierz najbliższy wierzchołek do dowolnego w cycle
+            next_node = min(
+                unvisited,
+                key=lambda node: min(self.distance_matrix[node, cycle[i]] for i in range(len(cycle)))
+            )
+
+            # Znajdź najlepszą pozycję do wstawienia
+            best_position = min(
+                range(len(cycle)),
+                key=lambda i: self.distance_matrix[cycle[i], next_node]
+                            + self.distance_matrix[next_node, cycle[(i + 1) % len(cycle)]]
+                            - self.distance_matrix[cycle[i], cycle[(i + 1) % len(cycle)]]
+            )
+
             cycle.insert(best_position + 1, next_node)
             unvisited.remove(next_node)
 
@@ -273,7 +295,7 @@ print("Cycle 2:", cycle2_krob200_weighted_regret, "Length:", length2_krob200_wei
 
 plt.figure(figsize=(16, 12))
 
-# kroA200
+# # kroA200
 optimizer_kroa200_greedy.plot_cycles(cycle1_kroa200_greedy, cycle2_kroa200_greedy, "Greedy Cycle - kroA200", 241)
 optimizer_kroa200_nn.plot_cycles(cycle1_kroa200_nn, cycle2_kroa200_nn, "Nearest Neighbor - kroA200", 242)
 optimizer_kroa200_regret.plot_cycles(cycle1_kroa200_regret, cycle2_kroa200_regret, "2-Regret - kroA200", 243)
