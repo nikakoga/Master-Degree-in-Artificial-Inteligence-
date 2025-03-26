@@ -5,175 +5,218 @@ import matplotlib.pyplot as plt
 
 class CycleOptimizer:
     def __init__(self, problem_name):
-        self.problem = self.load_problem(problem_name)
-        self.distance_matrix = self.calculate_distance_matrix(self.problem)
+        self.problem = tsplib95.load(f"{problem_name}.tsp")
+        self.nodes = list(self.problem.get_nodes())
+        self.distance_matrix = self._compute_distance_matrix()
+        self.coords = np.array([self.problem.node_coords[i] for i in self.nodes])
 
-    def load_problem(self, problem_name):
-        return tsplib95.load(f'{problem_name}.tsp')
-
-    def calculate_distance_matrix(self, problem):
-        nodes = list(problem.get_nodes())
-        n = len(nodes)
-        distance_matrix = np.zeros((n, n))
+    def _compute_distance_matrix(self):
+        n = len(self.nodes)
+        matrix = np.zeros((n, n))
         for i in range(n):
             for j in range(n):
                 if i != j:
-                    distance_matrix[i, j] = problem.get_weight(nodes[i], nodes[j])
-        return distance_matrix
+                    matrix[i][j] = self.problem.get_weight(self.nodes[i], self.nodes[j])
+        return matrix
 
-    def create_two_cycles(self):
-        raise NotImplementedError("This method should be implemented by subclasses")
+    def cycle_length(self, cycle):
+        return sum(
+            self.distance_matrix[cycle[i], cycle[(i + 1) % len(cycle)]]
+            for i in range(len(cycle))
+        )
+        
+    def plot_cycles(self, cycle1, cycle2, title=""):
+        plt.figure(figsize=(8, 6))
+        coords = self.coords
 
-    def calculate_cycle_length(self, cycle):
-        length = 0
-        for i in range(len(cycle)):
-            length += self.distance_matrix[cycle[i], cycle[(i + 1) % len(cycle)]]
-        return length
+        # Draw cycle 1
+        for i in range(len(cycle1)):
+            a = coords[cycle1[i]]
+            b = coords[cycle1[(i + 1) % len(cycle1)]]
+            plt.plot([a[0], b[0]], [a[1], b[1]], 'b-', linewidth=1.5)
+        plt.scatter(coords[cycle1, 0], coords[cycle1, 1], c='blue', label='Cycle 1')
 
-    def plot_cycles(self, cycle1, cycle2, title, subplot_position):
-        nodes = list(self.problem.get_nodes())
-        coordinates = np.array([self.problem.node_coords[node] for node in nodes])
+        # Draw cycle 2
+        for i in range(len(cycle2)):
+            a = coords[cycle2[i]]
+            b = coords[cycle2[(i + 1) % len(cycle2)]]
+            plt.plot([a[0], b[0]], [a[1], b[1]], 'orange', linewidth=1.5)
+        plt.scatter(coords[cycle2, 0], coords[cycle2, 1], c='orange', label='Cycle 2')
 
-        plt.subplot(subplot_position)
-        plt.scatter(coordinates[:, 0], coordinates[:, 1], c='black')
-
-        def plot_cycle(cycle, color):
-            cycle_coords = np.array([coordinates[node] for node in cycle])
-            cycle_coords = np.vstack([cycle_coords, cycle_coords[0]])
-            plt.plot(cycle_coords[:, 0], cycle_coords[:, 1], color=color)
-
-        plot_cycle(cycle1, 'blue')
-        plot_cycle(cycle2, 'red')
+        # Draw labels
+        for i, (x, y) in enumerate(coords):
+            plt.text(x, y, str(i), fontsize=6, ha='center', va='center')
 
         plt.title(title)
-        plt.xlabel('X')
-        plt.ylabel('Y')
-
+        plt.axis('equal')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
 class BalancedCycleOptimizer(CycleOptimizer):
-    def insert_best(self, cycle, unvisited, strategy):
-        best_value = float('inf')
+    def insert_best(self, cycle, unvisited, strategy, regret_mode=False):
+        best_score = float('inf')
         best_node = None
         best_pos = None
 
         for node in unvisited:
+            insertions = []
             for i in range(len(cycle)):
                 a, b = cycle[i], cycle[(i + 1) % len(cycle)]
-                increase = self.distance_matrix[a, node] + self.distance_matrix[node, b] - self.distance_matrix[a, b]
-                value = strategy(increase, a, node, b)
-                if value < best_value:
-                    best_value = value
-                    best_node = node
-                    best_pos = i + 1
+                score = strategy(a, node, b)
+                insertions.append((score, i + 1))
+            insertions.sort()
+
+            if len(insertions) >= 2:
+                regret = insertions[1][0] - insertions[0][0]
+            else:
+                regret = 0
+
+            if regret_mode:
+                total_score = regret
+            else:
+                total_score = insertions[0][0]
+
+            if total_score < best_score:
+                best_score = total_score
+                best_node = node
+                best_pos = insertions[0][1]
 
         return best_node, best_pos
 
-    def build_balanced_cycles(self, strategy):
-        n = len(self.distance_matrix)
-        target1 = n // 2 + n % 2
-        target2 = n // 2
+    def build_cycles(self, strategy, regret_mode=False):
+        n = len(self.nodes)
+        t1, t2 = n // 2 + n % 2, n // 2
+        s1 = random.randint(0, n - 1)
+        s2 = max(range(n), key=lambda i: self.distance_matrix[s1][i])
 
-        start1 = random.randint(0, n - 1)
-        start2 = max(range(n), key=lambda i: self.distance_matrix[start1][i])
+        c1, c2 = [s1, s1], [s2, s2]
+        unvisited = set(range(n)) - {s1, s2}
 
-        cycle1 = [start1, start1]
-        cycle2 = [start2, start2]
-
-        unvisited = set(range(n)) - {start1, start2}
-
-        while len(cycle1) - 1 < target1 or len(cycle2) - 1 < target2:
-            if len(cycle1) - 1 < target1:
-                node, pos = self.insert_best(cycle1, unvisited, strategy)
-                cycle1.insert(pos, node)
+        while len(c1) - 1 < t1 or len(c2) - 1 < t2:
+            if len(c1) - 1 < t1:
+                node, pos = self.insert_best(c1, unvisited, strategy, regret_mode)
+                c1.insert(pos, node)
                 unvisited.remove(node)
-            if len(cycle2) - 1 < target2 and unvisited:
-                node, pos = self.insert_best(cycle2, unvisited, strategy)
-                cycle2.insert(pos, node)
+            if len(c2) - 1 < t2 and unvisited:
+                node, pos = self.insert_best(c2, unvisited, strategy, regret_mode)
+                c2.insert(pos, node)
                 unvisited.remove(node)
 
-        return cycle1[:-1], cycle2[:-1]
+        return c1[:-1], c2[:-1]
 
+# === ALGORYTMY ===
 
-class GreedyCycleOptimizer(BalancedCycleOptimizer):
+class Greedy(BalancedCycleOptimizer):
     def create_two_cycles(self):
-        return self.build_balanced_cycles(lambda inc, a, n, b: inc)
+        def strategy(a, n, b):
+            return self.distance_matrix[a][n] + self.distance_matrix[n][b] - self.distance_matrix[a][b]
+        return self.build_cycles(strategy, regret_mode=False)
 
-
-class NearestNeighborCycleOptimizer(BalancedCycleOptimizer):
+class NearestNeighbor(BalancedCycleOptimizer):
     def create_two_cycles(self):
-        def nearest_insertion_cost(inc, a, n, b):
-            return min(self.distance_matrix[n][a], self.distance_matrix[n][b])
-        return self.build_balanced_cycles(nearest_insertion_cost)
+        def strategy(a, n, b):
+            return min(self.distance_matrix[a][n], self.distance_matrix[n][b])
+        return self.build_cycles(strategy, regret_mode=False)
 
-
-class RegretCycleOptimizer(BalancedCycleOptimizer):
+class TwoRegret(BalancedCycleOptimizer):
     def create_two_cycles(self):
-        def regret_strategy(inc, a, n, b):
-            return inc
-        return self.build_balanced_cycles(regret_strategy)
+        def strategy(a, n, b):
+            return self.distance_matrix[a][n] + self.distance_matrix[n][b] - self.distance_matrix[a][b]
+        return self.build_cycles(strategy, regret_mode=True)
 
+class Weighted2Regret(BalancedCycleOptimizer):
+    def create_two_cycles(self, w1=1.2, w2=-0.7):
+        def strategy(a, n, b):
+            increase = self.distance_matrix[a][n] + self.distance_matrix[n][b] - self.distance_matrix[a][b]
+            proximity = (self.distance_matrix[a][n] + self.distance_matrix[n][b]) / 2
+            return w1 * increase + w2 * proximity
+        return self.build_cycles(strategy, regret_mode=False)
 
-class WeightedRegretCycleOptimizer(BalancedCycleOptimizer):
-    def create_two_cycles(self, weight1=1, weight2=-1):
-        def weighted_regret(inc, a, n, b):
-            return weight1 * inc + weight2 * (self.distance_matrix[a][n] + self.distance_matrix[n][b]) / 2
-        return self.build_balanced_cycles(weighted_regret)
+# === EKSPERYMENTY ===
 
-
-# === EXPERIMENTAL RESULTS TABLE ===
-def run_experiments(optimizer_class, problem_name, label, runs=100):
-    total_lengths = []
-
-    for i in range(runs):
-        random.seed(i)
-        optimizer = optimizer_class(problem_name)
-        if isinstance(optimizer, WeightedRegretCycleOptimizer):
-            cycle1, cycle2 = optimizer.create_two_cycles(weight1=1, weight2=-1)
+def run_experiment(optimizer_class, instance, label):
+    results = []
+    for i in range(100):
+        optimizer = optimizer_class(instance)
+        if label == "Weighted 2-Regret":
+            c1, c2 = optimizer.create_two_cycles(w1=1.2, w2=-0.7)
         else:
-            cycle1, cycle2 = optimizer.create_two_cycles()
-        length1 = optimizer.calculate_cycle_length(cycle1)
-        length2 = optimizer.calculate_cycle_length(cycle2)
-        total_lengths.append(length1 + length2)
+            c1, c2 = optimizer.create_two_cycles()
+        total = optimizer.cycle_length(c1) + optimizer.cycle_length(c2)
+        results.append(total)
+    avg = round(np.mean(results), 2)
+    return f"{avg} ({int(np.min(results))} – {int(np.max(results))})"
 
-    avg = round(np.mean(total_lengths), 2)
-    min_val = int(np.min(total_lengths))
-    max_val = int(np.max(total_lengths))
+def full_table():
+    instances = ["kroA200", "kroB200"]
+    methods = [
+        (Greedy, "Greedy"),
+        (NearestNeighbor, "Nearest Neighbor"),
+        (TwoRegret, "2-Regret"),
+        (Weighted2Regret, "Weighted 2-Regret")
+    ]
 
-    return f"{avg} ({min_val} – {max_val})"
+    print(f"{'':<20} {'kroA200':<30} {'kroB200'}")
+    print("=" * 80)
+    for cls, label in methods:
+        res_a = run_experiment(cls, "kroA200", label)
+        res_b = run_experiment(cls, "kroB200", label)
+        print(f"{label:<20} {res_a:<30} {res_b}")
 
-methods = [
-    (GreedyCycleOptimizer, "Greedy"),
-    (NearestNeighborCycleOptimizer, "Nearest Neighbor"),
-    (RegretCycleOptimizer, "2-Regret"),
-    (WeightedRegretCycleOptimizer, "Weighted 2-Regret")
-]
 
-# === OPTIONAL: PLOT EXAMPLES ===
-def plot_example_cycles():
-    fig = plt.figure(figsize=(12, 10))
-    for j, instance in enumerate(["kroA200", "kroB200"]):
-        for i, (optimizer_class, label) in enumerate(methods):
-            optimizer = optimizer_class(instance)
-            if isinstance(optimizer, WeightedRegretCycleOptimizer):
-                cycle1, cycle2 = optimizer.create_two_cycles(weight1=1, weight2=-1)
+def visualize_all_cycles():
+    instances = ["kroA200", "kroB200"]
+    methods = [
+        (Greedy, "Greedy"),
+        (NearestNeighbor, "Nearest Neighbor"),
+        (TwoRegret, "2-Regret"),
+        (Weighted2Regret, "Weighted 2-Regret")
+    ]
+
+    fig, axes = plt.subplots(len(instances), len(methods), figsize=(16, 8))
+    fig.suptitle("Cycle Visualizations", fontsize=18)
+
+    for i, instance in enumerate(instances):
+        for j, (cls, label) in enumerate(methods):
+            random.seed(42) # czemu?
+            optimizer = cls(instance)
+            if label == "Weighted 2-Regret":
+                c1, c2 = optimizer.create_two_cycles(w1=1.2, w2=-0.7)
             else:
-                cycle1, cycle2 = optimizer.create_two_cycles()
-            pos = 4 * j + i + 1  # 4 columns layout: 2x4 (instance x methods)
-            optimizer.plot_cycles(cycle1, cycle2, f"{label} - {instance}", 240 + pos)
-    plt.tight_layout()
+                c1, c2 = optimizer.create_two_cycles()
+
+            ax = axes[i][j] if len(instances) > 1 else axes[j]
+            coords = optimizer.coords
+
+            # CYCLE 1 - blue
+            for k in range(len(c1)):
+                a = coords[c1[k]]
+                b = coords[c1[(k + 1) % len(c1)]]
+                ax.plot([a[0], b[0]], [a[1], b[1]], color='blue', linewidth=1)
+            ax.scatter(coords[c1, 0], coords[c1, 1], color='blue', edgecolors='black', s=10, zorder=3)
+
+            # CYCLE 2 - red
+            for k in range(len(c2)):
+                a = coords[c2[k]]
+                b = coords[c2[(k + 1) % len(c2)]]
+                ax.plot([a[0], b[0]], [a[1], b[1]], color='red', linewidth=1)
+            ax.scatter(coords[c2, 0], coords[c2, 1], color='red', edgecolors='black', s=10, zorder=3)
+
+            # Node labels
+            for idx, (x, y) in enumerate(coords):
+                ax.text(x, y, str(idx), fontsize=4, ha='center', va='center')
+
+            ax.set_title(f"{label} - {instance}", fontsize=10)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_xlim(coords[:, 0].min() - 50, coords[:, 0].max() + 50)
+            ax.set_ylim(coords[:, 1].min() - 50, coords[:, 1].max() + 50)
+            ax.set_aspect('equal')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
 
-print("\n=== EXPERIMENTAL RESULTS (100 RUNS) ===")
 
-instances = ["kroA200", "kroB200"]
-
-header = "| Method \t\t\t| kroA200 \t\t\t\t| kroB200 \t\t\t\t|"
-separator = "|-----------------------|-------------------------------|-------------------------------|"
-print(header)
-print(separator)
-
-for optimizer_class, label in methods:
-    results = [run_experiments(optimizer_class, inst, label) for inst in instances]
-    print(f"| {label:<21} | {results[0]:<29} | {results[1]:<29} |")
-
-plot_example_cycles()
+full_table()
+visualize_all_cycles()
